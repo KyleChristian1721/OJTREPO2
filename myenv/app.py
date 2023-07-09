@@ -6,15 +6,7 @@ import seaborn as sns
 from PIL import Image
 import base64
 from matplotlib.backends.backend_agg import RendererAgg
-import torch
-from transformers import BertTokenizer, BertForQuestionAnswering
-from transformers import pipeline
 import sqlite3
-
-model_name = "bert-large-uncased-whole-word-masking-finetuned-squad"
-
-# Initialize the question-answering pipeline with the specified model
-qa_pipeline = pipeline("question-answering", model=model_name)
 
 # Function to convert image to base64
 def image_to_base64(image):
@@ -40,40 +32,6 @@ def authenticate(username, password):
         return True
     else:
         return False
-
-# Function to perform question answering with context segmentation
-def answer_question(context, question):
-    tokenizer = BertTokenizer.from_pretrained("bert-large-uncased-whole-word-masking-finetuned-squad")
-    model = BertForQuestionAnswering.from_pretrained("bert-large-uncased-whole-word-masking-finetuned-squad")
-
-    # Tokenize the question and context
-    encoded_inputs = tokenizer.encode_plus(question, context, add_special_tokens=True, return_tensors="pt", max_length=512, truncation=True)
-    input_ids = encoded_inputs["input_ids"]
-    attention_mask = encoded_inputs["attention_mask"]
-
-    # Segment the input into chunks of size 512 (excluding special tokens)
-    chunk_size = 512 - tokenizer.num_special_tokens_to_add(pair=True)
-    chunks = [input_ids[:, i:i+chunk_size] for i in range(0, input_ids.size(1), chunk_size)]
-    chunk_masks = [attention_mask[:, i:i+chunk_size] for i in range(0, attention_mask.size(1), chunk_size)]
-
-    answers = []
-    for chunk, mask in zip(chunks, chunk_masks):
-        with torch.no_grad():
-            outputs = model(input_ids=chunk, attention_mask=mask)
-            start_scores = outputs.start_logits
-            end_scores = outputs.end_logits
-
-        # Find the start and end indices with the maximum scores
-        start_index = torch.argmax(start_scores, dim=1).item()
-        end_index = torch.argmax(end_scores, dim=1).item()
-
-        # Convert token indices to tokens and concatenate the answer
-        answer = tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens(chunk[0, start_index:end_index+1]))
-        answers.append(answer)
-
-    # Concatenate the answers from all chunks
-    answer = " ".join(answers)
-    return answer
 
 
 # Function to read and display Excel data with question-answering feature
@@ -108,10 +66,19 @@ def display_excel_data(file_path, conn):
     
     with col1:
         selected_category = st.selectbox("Select a category", categories)
+        sorting_options = ["None", "Ascending", "Descending"]
+        selected_sorting = st.selectbox("Select sorting order", sorting_options)
+        
         if st.button("Apply Dropdown Filter"):
             with _lock:
                 filtered_df = df[[selected_category]]
                 filtered_df = filtered_df.dropna()
+                
+                if selected_sorting == "Ascending":
+                    filtered_df.sort_values(by=selected_category, ascending=True, inplace=True)
+                elif selected_sorting == "Descending":
+                    filtered_df.sort_values(by=selected_category, ascending=False, inplace=True)
+                
                 st.subheader("Filtered Data (Dropdown Filter)")
                 st.dataframe(filtered_df)
 
@@ -126,36 +93,37 @@ def display_excel_data(file_path, conn):
                 st.pyplot(fig)
 
     with col2:
-        search_input = st.text_input("Search Filter")
+        categories = st.multiselect("Select categories for filtering", ["Global"] + categories)
+        search_inputs = []
+        for category in categories:
+            search_inputs.append(st.text_input(f"Search Filter ({category})", key=f"search_input_{category}"))
         if st.button("Apply Search Filter"):
             with _lock:
-                if search_input:
-                    filtered_df = df.apply(lambda row: row.astype(str).str.contains(search_input, case=False).any(), axis=1)
-                    filtered_df = df[filtered_df]
-                    if filtered_df.empty:
-                        st.write("No results found.")
-                    else:
-                        st.subheader("Filtered Data (Search Filter)")
+                filtered_df = df.copy()
+                for category, search_input in zip(categories, search_inputs):
+                    if search_input:
+                        if category == "Global":
+                            filtered_df = filtered_df.apply(lambda row: row.astype(str).str.contains(search_input, case=False).any(), axis=1)
+                        else:
+                            filtered_df = filtered_df[filtered_df[category].astype(str).str.contains(search_input, case=False)]
+                
+                if filtered_df.empty:
+                    st.write("No results found.")
+                else:
+                    st.subheader("Filtered Data (Search Filter)")
 
-                        # Apply highlighting to search results
-                        def highlight_search_results(value):
-                            if search_input.lower() in str(value).lower():
+                    # Apply highlighting to search results
+                    def highlight_search_results(value, category):
+                        if category == "Global":
+                            if any(search_input.lower() in str(value).lower() for search_input in search_inputs):
                                 return "background-color: yellow"
-                            else:
-                                return ""
+                        else:
+                            if any(search_input.lower() in str(value).lower() and str(category) == str(value) for search_input, category in zip(search_inputs, categories)):
+                                return "background-color: yellow"
+                        return ""
 
-                        styled_df = filtered_df.style.applymap(highlight_search_results)
-                        st.dataframe(styled_df)
-
-    # Question-answering feature
-    question = st.text_input("Ask a question about the data:")
-    if st.button("Get Answer"):
-        with _lock:
-            if question:
-                # Prepare the context for question answering
-                context = "\n".join([f"{index+1}. " + " | ".join(row.astype(str)) for index, row in df.iterrows()])
-                answer = answer_question(context, question)
-                st.write("Answer:", answer)
+                    styled_df = filtered_df.style.applymap(lambda x: highlight_search_results(x, categories))
+                    st.dataframe(styled_df)
 
 # Function to create the file history table in the database
 def create_file_history_table(conn):
