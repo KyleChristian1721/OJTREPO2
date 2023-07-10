@@ -1,5 +1,5 @@
 import streamlit as st
-import os
+import io
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -64,49 +64,53 @@ def display_excel_data(file_path, conn):
             )
 
     
-    with col1:
-        selected_category = st.selectbox("Select a category", categories)
-        sorting_options = ["None", "Ascending", "Descending"]
-        selected_sorting = st.selectbox("Select sorting order", sorting_options)
-        
-        if st.button("Apply Dropdown Filter"):
-            with _lock:
-                filtered_df = df[[selected_category]]
-                filtered_df = filtered_df.dropna()
-                
-                if selected_sorting == "Ascending":
-                    filtered_df.sort_values(by=selected_category, ascending=True, inplace=True)
-                elif selected_sorting == "Descending":
-                    filtered_df.sort_values(by=selected_category, ascending=False, inplace=True)
-                
-                st.subheader("Filtered Data (Dropdown Filter)")
-                st.dataframe(filtered_df)
 
-                # Create a simple bar graph for demonstration purposes
-                st.subheader("Filtered Data Graph (Dropdown Filter)")
-                sns.set_theme()
-                fig, ax = plt.subplots()
-                ax = sns.countplot(data=filtered_df, x=selected_category)
-                ax.set_xlabel(selected_category)
-                ax.set_ylabel("Count")
-                ax.set_title("Filtered Data Count Plot")
-                st.pyplot(fig)
+
+    with col1:
+        search_input = st.text_input("Global Filter")
+
+        if st.button("Apply Global Filter"):
+            with _lock:
+                filtered_df = df.copy()
+
+                if search_input:
+                    # Apply global filter
+                    filtered_df = filtered_df[filtered_df.apply(lambda row: row.astype(str).str.contains(search_input, case=False).any(), axis=1)]
+
+                st.subheader("Filtered Data (Global Filter)")
+                styled_df = filtered_df.style
+
+                # Apply highlighting to search results
+                def highlight_search_results(value):
+                    if search_input.lower() in str(value).lower():
+                        return "background-color: yellow"
+                    return ""
+
+                styled_df = styled_df.applymap(highlight_search_results)
+                st.dataframe(styled_df)
 
     with col2:
+        sorting_options = ["None", "Ascending", "Descending"]
         categories = st.multiselect("Select categories for filtering", ["Global"] + categories)
         search_inputs = []
         for category in categories:
             search_inputs.append(st.text_input(f"Search Filter ({category})", key=f"search_input_{category}"))
+
+        selected_sorting = st.selectbox("Select sorting order (Search Filter)", sorting_options, key="search_sorting")
+
         if st.button("Apply Search Filter"):
             with _lock:
-                filtered_df = df.copy()
+                filtered_df = df.copy() 
                 for category, search_input in zip(categories, search_inputs):
                     if search_input:
                         if category == "Global":
-                            filtered_df = filtered_df.apply(lambda row: row.astype(str).str.contains(search_input, case=False).any(), axis=1)
+                            filtered_df = filtered_df[filtered_df.apply(lambda row: row.astype(str).str.contains(search_input, case=False).any(), axis=1)]
                         else:
                             filtered_df = filtered_df[filtered_df[category].astype(str).str.contains(search_input, case=False)]
-                
+
+                if not filtered_df.empty and selected_sorting != "None":
+                    filtered_df.sort_values(by=filtered_df.columns[0], ascending=(selected_sorting == "Ascending"), inplace=True)
+
                 if filtered_df.empty:
                     st.write("No results found.")
                 else:
@@ -122,9 +126,23 @@ def display_excel_data(file_path, conn):
                                 return "background-color: yellow"
                         return ""
 
-                    styled_df = filtered_df.style.applymap(lambda x: highlight_search_results(x, categories))
-                    st.dataframe(styled_df)
+                    styled_df = filtered_df.style.applymap(lambda x: highlight_search_results(x, categories)).set_table_styles([{'selector': 'tr:hover','props': [('background-color', 'yellow')]}])
+                    st.write(styled_df)
 
+                    # Display line graph
+                    st.subheader("Filtered Data Line Graph")
+                    plt.plot(filtered_df.iloc[:, 1], filtered_df.iloc[:, 4])
+                    st.pyplot()
+
+                    # Export filtered data
+                    csv = filtered_df.to_csv(index=False)
+                    b64 = base64.b64encode(csv.encode()).decode()
+                    href = f'<a href="data:file/csv;base64,{b64}" download="filtered_data.csv">Download CSV</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+
+
+
+                        
 # Function to create the file history table in the database
 def create_file_history_table(conn):
     cursor = conn.cursor()
@@ -229,6 +247,7 @@ def main():
         page_icon=image,
         layout="wide"
     )
+    st.set_option('deprecation.showPyplotGlobalUse', False)
 
     # Custom CSS for the sidebar
     st.markdown(
