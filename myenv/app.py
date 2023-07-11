@@ -33,7 +33,6 @@ def authenticate(username, password):
     else:
         return False
 
-
 # Function to read and display Excel data with question-answering feature
 def display_excel_data(file_path, conn):
     df = pd.read_excel(file_path)
@@ -41,55 +40,29 @@ def display_excel_data(file_path, conn):
 
     # Get column names from the first row of the DataFrame
     categories = df.columns.tolist()
-    col1, col2 = st.columns(2)
+    col2 = st.columns(1)
 
     if not st.session_state["logged_in"]:
-        with col1:
-            st.markdown(
-                f"""
-                <style>
-                .login-container {{
-                    max-width: 500px;
-                    margin: 0 auto;
-                }}
-                </style>
+        col2[0].markdown(
+            f"""
+            <style>
+            .login-container {{
+                max-width: 500px;
+                margin: 0 auto;
+            }}
+            </style>
 
-                <div class="login-container">
-                    <h1 style='text-align: center;'>
-                        TUP | Data Filter
-                    </h1>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
-
-    
-
-
-    with col1:
-        search_input = st.text_input("Global Filter")
-
-        if st.button("Apply Global Filter"):
-            with _lock:
-                filtered_df = df.copy()
-
-                if search_input:
-                    # Apply global filter
-                    filtered_df = filtered_df[filtered_df.apply(lambda row: row.astype(str).str.contains(search_input, case=False).any(), axis=1)]
-
-                st.subheader("Filtered Data (Global Filter)")
-                styled_df = filtered_df.style
-
-                # Apply highlighting to search results
-                def highlight_search_results(value):
-                    if search_input.lower() in str(value).lower():
-                        return "background-color: yellow"
-                    return ""
-
-                styled_df = styled_df.applymap(highlight_search_results)
-                st.dataframe(styled_df)
-
-    with col2:
+            <div class="login-container">
+                <h1 style='text-align: center;'>
+                    TUP | Data Filter
+                </h1>
+            </div>
+            """,
+            unsafe_allow_html=True
+            
+        )
+        
+    with col2[0]:
         sorting_options = ["None", "Ascending", "Descending"]
         categories = st.multiselect("Select categories for filtering", ["Global"] + categories)
         search_inputs = []
@@ -97,10 +70,12 @@ def display_excel_data(file_path, conn):
             search_inputs.append(st.text_input(f"Search Filter ({category})", key=f"search_input_{category}"))
 
         selected_sorting = st.selectbox("Select sorting order (Search Filter)", sorting_options, key="search_sorting")
+        
+        selected_Barcategory = st.selectbox("Select category for bar graph", df.columns)
 
         if st.button("Apply Search Filter"):
             with _lock:
-                filtered_df = df.copy() 
+                filtered_df = df.copy()
                 for category, search_input in zip(categories, search_inputs):
                     if search_input:
                         if category == "Global":
@@ -108,8 +83,11 @@ def display_excel_data(file_path, conn):
                         else:
                             filtered_df = filtered_df[filtered_df[category].astype(str).str.contains(search_input, case=False)]
 
-                if not filtered_df.empty and selected_sorting != "None":
-                    filtered_df.sort_values(by=filtered_df.columns[0], ascending=(selected_sorting == "Ascending"), inplace=True)
+                if not filtered_df.empty:
+                    if selected_sorting == "Ascending":
+                        filtered_df.sort_index(ascending=True, inplace=True)
+                    elif selected_sorting == "Descending":
+                        filtered_df.sort_index(ascending=False, inplace=True)
 
                 if filtered_df.empty:
                     st.write("No results found.")
@@ -129,20 +107,27 @@ def display_excel_data(file_path, conn):
                     styled_df = filtered_df.style.applymap(lambda x: highlight_search_results(x, categories)).set_table_styles([{'selector': 'tr:hover','props': [('background-color', 'yellow')]}])
                     st.write(styled_df)
 
-                    # Display line graph
-                    st.subheader("Filtered Data Line Graph")
-                    plt.plot(filtered_df.iloc[:, 1], filtered_df.iloc[:, 4])
-                    st.pyplot()
+                # Display bar graph based on filtered data
+                st.subheader("Filtered Data Bar Graph")
 
-                    # Export filtered data
-                    csv = filtered_df.to_csv(index=False)
-                    b64 = base64.b64encode(csv.encode()).decode()
-                    href = f'<a href="data:file/csv;base64,{b64}" download="filtered_data.csv">Download CSV</a>'
-                    st.markdown(href, unsafe_allow_html=True)
+                fig, ax = plt.subplots(figsize=(10, 6))  # Adjust the figure size as needed
+                ax.bar(filtered_df[selected_Barcategory].value_counts().index, filtered_df[selected_Barcategory].value_counts())
+                ax.set_xlabel(selected_Barcategory)
+                ax.set_ylabel("Count")
+                ax.set_title("Filtered Data Bar Graph")
+                ax.tick_params(axis="x", rotation=45)  # Rotate x-axis labels if needed
+                ax.spines["top"].set_visible(False)  # Remove top border
+                ax.spines["right"].set_visible(False)  # Remove right border
+                plt.tight_layout()  # Adjust spacing
 
+                st.pyplot(fig)
 
+                # Export filtered data
+                csv = filtered_df.to_csv(index=False)
+                b64 = base64.b64encode(csv.encode()).decode()
 
-                        
+                st.download_button("Download CSV", data=csv, file_name="filtered_data.csv")
+                   
 # Function to create the file history table in the database
 def create_file_history_table(conn):
     cursor = conn.cursor()
