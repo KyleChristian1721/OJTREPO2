@@ -7,6 +7,7 @@ from PIL import Image
 import base64
 from matplotlib.backends.backend_agg import RendererAgg
 import sqlite3
+import os
 
 # Function to convert image to base64
 def image_to_base64(image):
@@ -34,101 +35,119 @@ def authenticate(username, password):
         return False
 
 # Function to read and display Excel data with question-answering feature
+
 def display_excel_data(file_path, conn):
-    df = pd.read_excel(file_path)
-    st.dataframe(df)
+    chunk_size = 10000  # Adjust the chunk size based on your system's capabilities
 
-    # Get column names from the first row of the DataFrame
-    categories = df.columns.tolist()
-    col2 = st.columns(1)
+    with pd.ExcelFile(file_path) as xls:
+        sheet_names = xls.sheet_names
+        sheet_name = st.selectbox("Select sheet", sheet_names)
+        df = xls.parse(sheet_name, engine="openpyxl")
 
-    if not st.session_state["logged_in"]:
-        col2[0].markdown(
-            f"""
-            <style>
-            .login-container {{
-                max-width: 500px;
-                margin: 0 auto;
-            }}
-            </style>
+        # Iterate over the rows in chunks
+        for i in range(0, len(df), chunk_size):
+            df_chunk = df.iloc[i : i + chunk_size]
+            st.dataframe(df_chunk)
 
-            <div class="login-container">
-                <h1 style='text-align: center;'>
-                    TUP | Data Filter
-                </h1>
-            </div>
-            """,
-            unsafe_allow_html=True
-            
-        )
-        
-    with col2[0]:
-        sorting_options = ["None", "Ascending", "Descending"]
-        categories = st.multiselect("Select categories for filtering", ["Global"] + categories)
-        search_inputs = []
-        for category in categories:
-            search_inputs.append(st.text_input(f"Search Filter ({category})", key=f"search_input_{category}"))
+        # Get column names from the first row of the DataFrame
+        categories = df_chunk.columns.tolist()
+        col2 = st.columns(1)
 
-        selected_sorting = st.selectbox("Select sorting order (Search Filter)", sorting_options, key="search_sorting")
-        
-        selected_Barcategory = st.selectbox("Select category for bar graph", df.columns)
+        if not st.session_state["logged_in"]:
+            col2[0].markdown(
+                f"""
+                <style>
+                .login-container {{
+                    max-width: 500px;
+                    margin: 0 auto;
+                }}
+                </style>
 
-        if st.button("Apply Search Filter"):
-            with _lock:
-                filtered_df = df.copy()
-                for category, search_input in zip(categories, search_inputs):
-                    if search_input:
-                        if category == "Global":
-                            filtered_df = filtered_df[filtered_df.apply(lambda row: row.astype(str).str.contains(search_input, case=False).any(), axis=1)]
-                        else:
-                            filtered_df = filtered_df[filtered_df[category].astype(str).str.contains(search_input, case=False)]
+                <div class="login-container">
+                    <h1 style='text-align: center;'>
+                        TUP | Data Filter
+                    </h1>
+                </div>
+                """,
+                unsafe_allow_html=True
 
-                if not filtered_df.empty:
-                    if selected_sorting == "Ascending":
-                        filtered_df.sort_index(ascending=True, inplace=True)
-                    elif selected_sorting == "Descending":
-                        filtered_df.sort_index(ascending=False, inplace=True)
+            )
 
-                if filtered_df.empty:
-                    st.write("No results found.")
-                else:
-                    st.subheader("Filtered Data (Search Filter)")
+        with col2[0]:
+            categories = st.multiselect("Select categories for filtering", ["Global"] + categories)
+            search_inputs = []
+            for category in categories:
+                search_inputs.append(st.text_input(f"Search Filter ({category})", key=f"search_input_{category}"))
 
-                    # Apply highlighting to search results
-                    def highlight_search_results(value, category):
-                        if category == "Global":
-                            if any(search_input.lower() in str(value).lower() for search_input in search_inputs):
-                                return "background-color: yellow"
-                        else:
-                            if any(search_input.lower() in str(value).lower() and str(category) == str(value) for search_input, category in zip(search_inputs, categories)):
-                                return "background-color: yellow"
-                        return ""
+            selected_Barcategory = st.selectbox("Select category for bar graph", df_chunk.columns)
 
-                    styled_df = filtered_df.style.applymap(lambda x: highlight_search_results(x, categories)).set_table_styles([{'selector': 'tr:hover','props': [('background-color', 'yellow')]}])
-                    st.write(styled_df)
+            if st.button("Apply Search Filter"):
+                with _lock:
+                    filtered_df = df_chunk.copy()
+                    for category, search_input in zip(categories, search_inputs):
+                        if search_input:
+                            if category == "Global":
+                                search_mask = filtered_df.apply(lambda row: any(
+                                    str(search_input.strip()).lower() in str(value).strip().lower()
+                                    for value in row
+                                ), axis=1)
+                            else:
+                                search_mask = filtered_df[category].astype(str).str.strip().str.lower().str.contains(
+                                    str(search_input.strip()).lower()
+                                )
+                            filtered_df = filtered_df[search_mask]
 
-                # Display bar graph based on filtered data
-                st.subheader("Filtered Data Bar Graph")
+                    if filtered_df.empty:
+                        st.write("No results found.")
+                    else:
+                        st.subheader("Filtered Data (Search Filter)")
 
-                fig, ax = plt.subplots(figsize=(10, 6))  # Adjust the figure size as needed
-                ax.bar(filtered_df[selected_Barcategory].value_counts().index, filtered_df[selected_Barcategory].value_counts())
-                ax.set_xlabel(selected_Barcategory)
-                ax.set_ylabel("Count")
-                ax.set_title("Filtered Data Bar Graph")
-                ax.tick_params(axis="x", rotation=45)  # Rotate x-axis labels if needed
-                ax.spines["top"].set_visible(False)  # Remove top border
-                ax.spines["right"].set_visible(False)  # Remove right border
-                plt.tight_layout()  # Adjust spacing
+                        # Apply highlighting to search results
+                        def highlight_search_results(value, category):
+                            if category == "Global":
+                                if any(
+                                    str(search_input.strip()).lower() in str(value).strip().lower()
+                                    for search_input in search_inputs
+                                ):
+                                    return "background-color: yellow"
+                            else:
+                                if any(
+                                    str(search_input.strip()).lower() == str(value).strip().lower()
+                                    and str(category) == str(value)
+                                    for search_input, category in zip(search_inputs, categories)
+                                ):
+                                    return "background-color: yellow"
+                            return ""
 
-                st.pyplot(fig)
+                        styled_df = filtered_df.style.applymap(lambda x: highlight_search_results(x, categories)).set_table_styles([{'selector': 'tr:hover','props': [('background-color', 'yellow')]}])
+                        st.write(styled_df)
 
-                # Export filtered data
-                csv = filtered_df.to_csv(index=False)
-                b64 = base64.b64encode(csv.encode()).decode()
+                    # Display bar graph based on filtered data
+                    st.subheader("Filtered Data Bar Graph")
 
-                st.download_button("Download CSV", data=csv, file_name="filtered_data.csv")
-                   
+                    fig, ax = plt.subplots(figsize=(10, 6))  # Adjust the figure size as needed
+                    ax.bar(filtered_df[selected_Barcategory].value_counts().index, filtered_df[selected_Barcategory].value_counts())
+                    ax.set_xlabel(selected_Barcategory)
+                    ax.set_ylabel("Count")
+                    ax.set_title("Filtered Data Bar Graph")
+                    ax.tick_params(axis="x", rotation=45)  # Rotate x-axis labels if needed
+                    ax.spines["top"].set_visible(False)  # Remove top border
+                    ax.spines["right"].set_visible(False)  # Remove right border
+                    plt.tight_layout()  # Adjust spacing
+
+                    st.pyplot(fig)
+
+                    # Export filtered data
+                    csv = filtered_df.to_csv(index=False)
+                    b64 = base64.b64encode(csv.encode()).decode()
+
+                    st.download_button("Download CSV", data=csv, file_name="filtered_data.csv")
+
+
+
+
 # Function to create the file history table in the database
+
 def create_file_history_table(conn):
     cursor = conn.cursor()
     cursor.execute(
@@ -143,6 +162,7 @@ def create_file_history_table(conn):
     conn.commit()
 
 # Function to store the uploaded file name in the file history table
+
 def store_file_history(conn, file_name):
     cursor = conn.cursor()
     # Check if the file name already exists in the table
@@ -177,7 +197,7 @@ def get_selected_file_path(file_history):
     selected_file = st.sidebar.selectbox("Select a file from history", ["None"] + [file[1] for file in file_history])
     file_path = None
     if selected_file != "None":
-        file_path = selected_file
+        file_path = os.path.join("upload_folder", selected_file)
     return file_path
 
 # Main function
@@ -278,8 +298,12 @@ def main():
         if existing_file is None:
             # Store the uploaded file in the file history
             store_file_history(conn, uploaded_file.name)
+        # Save the uploaded file to the desired location
+        file_bytes = uploaded_file.read()
+        with open(os.path.join("upload_folder", uploaded_file.name), "wb") as file:
+            file.write(file_bytes)
         # Display uploaded file and apply filtering
-        display_excel_data(uploaded_file.name, conn)
+        display_excel_data(os.path.join("upload_folder", uploaded_file.name), conn)
     elif selected_file_path is not None:
         # Display the selected file and apply filtering
         display_excel_data(selected_file_path, conn)
