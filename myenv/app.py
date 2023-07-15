@@ -8,6 +8,7 @@ import base64
 from matplotlib.backends.backend_agg import RendererAgg
 import sqlite3
 import os
+import numpy as np
 
 # Function to convert image to base64
 def image_to_base64(image):
@@ -34,6 +35,16 @@ def authenticate(username, password):
     else:
         return False
 
+
+def convert_input_to_numeric(input_value):
+    try:
+        return int(input_value)
+    except ValueError:
+        try:
+            return float(input_value)
+        except ValueError:
+            return np.nan
+        
 # Function to read and display Excel data with question-answering feature
 
 def display_excel_data(file_path, conn):
@@ -92,10 +103,11 @@ def display_excel_data(file_path, conn):
                                     for value in row
                                 ), axis=1)
                             else:
-                                search_mask = filtered_df[category].astype(str).str.strip().str.lower().str.contains(
-                                    str(search_input.strip()).lower()
-                                )
-                            filtered_df = filtered_df[search_mask]
+                                if pd.api.types.is_numeric_dtype(filtered_df[category]):
+                                    search_mask = filtered_df[category] == convert_input_to_numeric(search_input)
+                                else:
+                                    search_mask = filtered_df[category].astype(str).str.strip().str.lower() == str(search_input.strip()).lower()
+                                filtered_df = filtered_df[search_mask]
 
                     if filtered_df.empty:
                         st.write("No results found.")
