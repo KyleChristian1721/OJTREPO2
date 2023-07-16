@@ -1,4 +1,5 @@
 import streamlit as st
+import matplotlib
 import io
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -52,7 +53,7 @@ def display_excel_data(file_path, conn):
 
     with pd.ExcelFile(file_path) as xls:
         sheet_names = xls.sheet_names
-        sheet_name = st.selectbox("Select sheet", sheet_names)
+        sheet_name = st.selectbox("", sheet_names)
         df = xls.parse(sheet_name, engine="openpyxl")
 
         # Iterate over the rows in chunks
