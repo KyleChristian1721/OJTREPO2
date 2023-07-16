@@ -17,6 +17,14 @@ def image_to_base64(image):
         encoded_image = base64.b64encode(file.read()).decode()
     return encoded_image
 
+logo_image = "TUP_LOGO.png"
+image = Image.open(logo_image)
+
+# Resize the image to the desired smaller size
+resized_image = image.resize((100, 100))
+
+# Convert the resized image to base64
+encoded_image = image_to_base64(logo_image)
 
 _lock = RendererAgg.lock
 
@@ -216,10 +224,14 @@ def main():
     if not st.session_state["logged_in"]:
         st.set_page_config(
             page_title='TUP | Data Filter',
-
+            page_icon=image,
             layout="centered"
         )
 
+        st.markdown(
+            f'<div style="display: flex; justify-content: center;"><img src="data:image/png;base64,{encoded_image}" alt="image" width="150" height="150"></div>',
+            unsafe_allow_html=True
+        )
 
         st.markdown(
             """
@@ -250,7 +262,7 @@ def main():
 
     st.set_page_config(
         page_title='TUP | Data Filter',
-
+        page_icon=image,
         layout="wide"
     )
     st.set_option('deprecation.showPyplotGlobalUse', False)
