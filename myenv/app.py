@@ -17,7 +17,7 @@ def image_to_base64(image):
         encoded_image = base64.b64encode(file.read()).decode()
     return encoded_image
 
-logo_image = "TUP_LOGO.png"
+logo_image = "https://github.com/KyleChristian1721/OJTREPO2/blob/master/myenv/TUP_LOGO.png"
 image = Image.open(logo_image)
 
 # Resize the image to the desired smaller size
